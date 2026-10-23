@@ -215,6 +215,46 @@ describe("t3 server command safety", () => {
 });
 
 describe("t3 app", () => {
+  it.effect("sends SSH aliases and absolute remote paths literally from the local machine", () =>
+    withTempDirectory("t3-app-ssh-test-", (root) =>
+      Effect.gen(function* () {
+        const desktop = yield* fakeDesktop({ baseDir: root });
+        const remotePath = "/remote/my project's + & # ? = %2F/проект";
+        yield* runCli(["app", "--ssh", "devbox", remotePath, "--base-dir", root]);
+        expect(desktop.received).toEqual([
+          {
+            version: 1,
+            requestId: expect.any(String),
+            type: "open-ssh-workspace",
+            sshAlias: "devbox",
+            workspaceRoot: remotePath,
+          },
+        ]);
+      }).pipe(Effect.scoped),
+    ),
+  );
+
+  it.effect("rejects missing or relative SSH paths without sending a request", () =>
+    withTempDirectory("t3-app-ssh-path-test-", (root) =>
+      Effect.gen(function* () {
+        const desktop = yield* fakeDesktop({ baseDir: root });
+        for (const args of [
+          [],
+          ["relative"],
+          ["~/project"],
+          ["C:\\project"],
+          ["/remote/\0project"],
+        ]) {
+          const error = yield* runCli(["app", "--ssh", "devbox", ...args, "--base-dir", root]).pipe(
+            Effect.flip,
+          );
+          expect(error).toMatchObject({ _tag: "DesktopAppSshPathError" });
+        }
+        expect(desktop.received).toHaveLength(0);
+      }).pipe(Effect.scoped),
+    ),
+  );
+
   it.effect("uses T3CODE_HOME or --base-dir and sends the default or explicit path", () =>
     withTempDirectory("t3-app-command-test-", (root) =>
       Effect.gen(function* () {
@@ -231,7 +271,11 @@ describe("t3 app", () => {
           workingDirectory,
           explicitPath,
         ]);
-        expect(desktop.received.every((request) => request.platform === platform)).toBe(true);
+        expect(
+          desktop.received.every(
+            (request) => request.type === "open-workspace" && request.platform === platform,
+          ),
+        ).toBe(true);
       }).pipe(Effect.scoped),
     ),
   );

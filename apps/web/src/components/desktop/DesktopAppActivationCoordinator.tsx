@@ -2,18 +2,25 @@ import { squashAtomCommandFailure } from "@t3tools/client-runtime/state/runtime"
 import type { DesktopAppActivationRequest } from "@t3tools/contracts";
 import { useEffect, useEffectEvent, useRef } from "react";
 
-import { handleDesktopAppActivationRequest } from "../../desktopAppActivation";
+import {
+  findDesktopAppSshEnvironment,
+  handleDesktopAppActivationRequest,
+} from "../../desktopAppActivation";
 import { useNewThreadHandler } from "../../hooks/useHandleNewThread";
 import { findProjectByPath, inferProjectTitleFromPath } from "../../lib/projectPaths";
 import { newProjectId } from "../../lib/utils";
 import { readProjects, waitForProject } from "../../state/entities";
-import { usePrimaryEnvironment } from "../../state/environments";
+import { useEnvironments, usePrimaryEnvironment } from "../../state/environments";
 import { projectEnvironment } from "../../state/projects";
-import { useEnvironmentShellHasSnapshot } from "../../state/shell";
+import { environmentShell, useEnvironmentShellHasSnapshot } from "../../state/shell";
+import { appAtomRegistry } from "../../rpc/atomRegistry";
+import { environmentPresentations } from "../../state/presentation";
+import { environmentCatalog } from "../../connection/catalog";
 import { useAtomCommand } from "../../state/use-atom-command";
 
 export function DesktopAppActivationCoordinator() {
   const primaryEnvironment = usePrimaryEnvironment();
+  const { isReady: catalogReady, environments } = useEnvironments();
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
   const openThread = useNewThreadHandler();
   const queueRef = useRef(Promise.resolve());
@@ -23,16 +30,42 @@ export function DesktopAppActivationCoordinator() {
   );
   const ready =
     activation !== undefined &&
-    primaryEnvironment?.connection.phase === "connected" &&
-    primaryEnvironment.serverConfig !== null &&
-    shellHasSnapshot;
+    catalogReady &&
+    ((primaryEnvironment?.connection.phase === "connected" &&
+      primaryEnvironment.serverConfig !== null &&
+      shellHasSnapshot) ||
+      environments.some(
+        (environment) =>
+          environment.entry.target._tag !== "PrimaryConnectionTarget" &&
+          environment.connection.phase === "connected" &&
+          environment.serverConfig !== null,
+      ));
 
   const processRequest = useEffectEvent(async (request: DesktopAppActivationRequest) =>
     handleDesktopAppActivationRequest(request, {
-      getTarget: () => {
+      getTarget: (request) => {
+        if (request.type === "open-ssh-workspace") {
+          const catalog = appAtomRegistry.get(environmentCatalog.catalogValueAtom);
+          const environmentId = findDesktopAppSshEnvironment(
+            request.sshAlias,
+            catalog.entries.values(),
+          );
+          const environment = appAtomRegistry.get(
+            environmentPresentations.presentationAtom(environmentId),
+          );
+          if (
+            environment?.connection.phase !== "connected" ||
+            environment.serverConfig === null ||
+            !appAtomRegistry.get(environmentShell.hasSnapshotAtom(environmentId))
+          ) {
+            return null;
+          }
+          return { environmentId, platform: environment.serverConfig.environment.platform.os };
+        }
         if (
           primaryEnvironment?.connection.phase !== "connected" ||
-          primaryEnvironment.serverConfig === null
+          primaryEnvironment.serverConfig === null ||
+          !shellHasSnapshot
         ) {
           return null;
         }

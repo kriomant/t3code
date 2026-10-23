@@ -18,7 +18,7 @@ import * as Effect from "effect/Effect";
 import * as Option from "effect/Option";
 import * as Path from "effect/Path";
 import * as Schema from "effect/Schema";
-import { Argument, Command } from "effect/cli";
+import { Argument, Command, Flag } from "effect/cli";
 
 import { expandHomePath, resolveBaseDir } from "../os-jank.ts";
 import { baseDirFlag } from "./config.ts";
@@ -33,6 +33,15 @@ export class DesktopAppSshUnsupportedError extends Schema.TaggedError<DesktopApp
 ) {
   override get message(): string {
     return "`t3 app` only controls a desktop app on the same machine. It cannot run over SSH.";
+  }
+}
+
+export class DesktopAppSshPathError extends Schema.TaggedError<DesktopAppSshPathError>()(
+  "DesktopAppSshPathError",
+  {},
+) {
+  override get message(): string {
+    return "With --ssh, provide an absolute remote path such as `t3 app --ssh devbox /home/user/project`. Local paths and ~ expansion are not supported.";
   }
 }
 
@@ -63,13 +72,14 @@ export class DesktopAppRequestFailedError extends Schema.TaggedError<DesktopAppR
   "DesktopAppRequestFailedError",
   {
     code: DesktopAppActivationErrorCode,
+    detail: Schema.String,
     requestId: Schema.String,
     workspaceRoot: Schema.String,
     cause: Schema.Defect(),
   },
 ) {
   override get message(): string {
-    return `T3 Code could not open ${this.workspaceRoot} (${this.code}).`;
+    return `T3 Code could not open ${this.workspaceRoot} (${this.code}): ${this.detail}`;
   }
 }
 
@@ -182,6 +192,7 @@ const appEnvironment = Config.all({
 const runAppCommand = Effect.fn("cli.app")(function* (flags: {
   readonly baseDir: Option.Option<string>;
   readonly workspaceRoot: Option.Option<string>;
+  readonly sshAlias: Option.Option<string>;
 }) {
   const environment = yield* appEnvironment;
   const hostPlatform = yield* HostProcess.Platform;
@@ -196,9 +207,24 @@ const runAppCommand = Effect.fn("cli.app")(function* (flags: {
   const configuredBaseDir = Option.getOrUndefined(flags.baseDir) ?? environment.t3Home;
   const baseDir = yield* resolveBaseDir(configuredBaseDir);
   const allowDevFallback = Option.isNone(flags.baseDir) && !environment.t3Home?.trim();
-  const rawWorkspaceRoot =
-    Option.getOrUndefined(flags.workspaceRoot) ?? (yield* HostProcess.WorkingDirectory);
-  const workspaceRoot = path.resolve(yield* expandHomePath(rawWorkspaceRoot));
+  const sshAlias = Option.getOrUndefined(flags.sshAlias);
+  const remotePath = Option.getOrUndefined(flags.workspaceRoot);
+  let workspaceRoot: string;
+  if (sshAlias !== undefined) {
+    if (
+      !sshAlias.trim() ||
+      remotePath === undefined ||
+      !remotePath.startsWith("/") ||
+      remotePath.includes("\0")
+    ) {
+      return yield* new DesktopAppSshPathError({});
+    }
+    workspaceRoot = remotePath;
+  } else {
+    workspaceRoot = path.resolve(
+      yield* expandHomePath(remotePath ?? (yield* HostProcess.WorkingDirectory)),
+    );
+  }
   const userId = yield* HostProcess.UserId;
   const resolveAddress = (stateSubdirectory: "userdata" | "dev") =>
     resolveDesktopAppControlAddress({
@@ -213,9 +239,10 @@ const runAppCommand = Effect.fn("cli.app")(function* (flags: {
   const request: DesktopAppActivationRequest = {
     version: DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION,
     requestId,
-    type: "open-workspace",
     workspaceRoot,
-    platform: hostPlatform,
+    ...(sshAlias === undefined
+      ? ({ type: "open-workspace", platform: hostPlatform } as const)
+      : ({ type: "open-ssh-workspace", sshAlias } as const)),
   };
   const address = resolveAddress("userdata");
   const fallbackAddress = allowDevFallback ? resolveAddress("dev") : undefined;
@@ -238,6 +265,7 @@ const runAppCommand = Effect.fn("cli.app")(function* (flags: {
   if (!response.ok) {
     return yield* new DesktopAppRequestFailedError({
       code: response.code,
+      detail: response.message,
       requestId: response.requestId,
       workspaceRoot,
       cause: response,
@@ -249,6 +277,12 @@ const runAppCommand = Effect.fn("cli.app")(function* (flags: {
 
 export const appCommand = Command.make("app", {
   baseDir: baseDirFlag,
+  sshAlias: Flag.String("ssh").pipe(
+    Flag.withDescription(
+      "Saved SSH alias in the local desktop app. Requires an absolute remote path.",
+    ),
+    Flag.optional,
+  ),
   workspaceRoot: Argument.String("path").pipe(
     Argument.withDescription("Project directory. Default: current directory."),
     Argument.optional,

@@ -106,6 +106,18 @@ Pass a path, such as `t3 app ../my-project`, to open another directory. It requi
 the desktop app, so a standalone server or an SSH session is not enough. If the
 command cannot reach the app, start or update the desktop app and try again.
 
+To open a project on a saved SSH environment, run this on the desktop machine:
+
+```bash
+t3 app --ssh devbox /home/user/my-project
+```
+
+First add and connect the same SSH alias through **Settings → Connections → Add
+environment → SSH**. The path must be absolute on the remote machine; it is not
+resolved against your local directory. This opens a new thread without sending a
+prompt. Missing, disabled, disconnected, or ambiguous SSH environments report an
+error instead of opening a local project.
+
 ## Mobile app
 
 Install T3 Code from the

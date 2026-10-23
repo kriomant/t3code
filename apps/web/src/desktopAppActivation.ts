@@ -1,3 +1,5 @@
+import { connectionRoutes, type ConnectionCatalogEntry } from "@t3tools/client-runtime/connection";
+import * as Option from "effect/Option";
 import type {
   DesktopAppActivationFailure,
   DesktopAppActivationRequest,
@@ -21,7 +23,7 @@ export interface DesktopAppActivationTarget {
 }
 
 export interface DesktopAppActivationDependencies {
-  readonly getTarget: () => DesktopAppActivationTarget | null;
+  readonly getTarget: (request: DesktopAppActivationRequest) => DesktopAppActivationTarget | null;
   readonly findProject: (
     environmentId: EnvironmentId,
     workspaceRoot: string,
@@ -45,7 +47,7 @@ function failure(
 }
 
 function desktopPlatformToEnvironmentOs(
-  platform: DesktopAppActivationRequest["platform"],
+  platform: Extract<DesktopAppActivationRequest, { type: "open-workspace" }>["platform"],
 ): ExecutionEnvironmentPlatformOs {
   return platform === "win32" ? "windows" : platform;
 }
@@ -58,17 +60,39 @@ export async function handleDesktopAppActivationRequest(
   request: DesktopAppActivationRequest,
   dependencies: DesktopAppActivationDependencies,
 ): Promise<DesktopAppActivationResponse> {
-  const target = dependencies.getTarget();
+  if (
+    request.type === "open-ssh-workspace" &&
+    (!request.workspaceRoot.startsWith("/") || request.workspaceRoot.includes("\0"))
+  ) {
+    return failure(
+      request.requestId,
+      "invalid-request",
+      "The SSH workspace must be an absolute remote path.",
+    );
+  }
+  let target: DesktopAppActivationTarget | null;
+  try {
+    target = dependencies.getTarget(request);
+  } catch (error) {
+    return failure(
+      request.requestId,
+      "environment-unavailable",
+      errorMessage(error, "The environment is not connected."),
+    );
+  }
   if (target === null) {
     return failure(
       request.requestId,
       "environment-unavailable",
-      "The desktop app's primary local environment is not connected.",
+      request.type === "open-ssh-workspace"
+        ? `Connect ${request.sshAlias} in Settings → Connections before opening this project.`
+        : "The desktop app's primary local environment is not connected.",
     );
   }
 
-  const requestPlatform = desktopPlatformToEnvironmentOs(request.platform);
-  if (requestPlatform !== target.platform) {
+  const requestPlatform =
+    request.type === "open-workspace" ? desktopPlatformToEnvironmentOs(request.platform) : null;
+  if (requestPlatform !== null && requestPlatform !== target.platform) {
     return failure(
       request.requestId,
       "platform-mismatch",
@@ -116,4 +140,29 @@ export async function handleDesktopAppActivationRequest(
       errorMessage(error, "T3 Code could not open a new thread for the project."),
     );
   }
+}
+
+export function findDesktopAppSshEnvironment(
+  alias: string,
+  entries: Iterable<ConnectionCatalogEntry>,
+): EnvironmentId {
+  const matches = Array.from(entries).filter((entry) =>
+    connectionRoutes(entry).some((route) => {
+      const profile = Option.getOrNull(route.profile);
+      return profile?._tag === "SshConnectionProfile" && profile.target.alias === alias;
+    }),
+  );
+  if (matches.length > 1) {
+    throw new Error(
+      `Several saved environments use SSH alias ${alias}. Remove the duplicate in Settings → Connections.`,
+    );
+  }
+  const entry = matches[0];
+  if (entry === undefined) {
+    throw new Error(`Add ${alias} through Settings → Connections → Add environment → SSH first.`);
+  }
+  if (!entry.enabled) {
+    throw new Error(`Enable ${alias} in Settings → Connections before opening this project.`);
+  }
+  return entry.target.environmentId;
 }

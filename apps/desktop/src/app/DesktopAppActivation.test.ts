@@ -81,6 +81,51 @@ function exchange(address: string, payload: DesktopAppActivationRequest) {
 }
 
 describe("desktop app control server", () => {
+  it.effect("accepts SSH workspace requests without a local platform or path conversion", () =>
+    Effect.gen(function* () {
+      const platform = yield* HostProcess.Platform;
+      const userId = yield* HostProcess.UserId;
+      yield* Effect.promise(async () => {
+        const root = await NodeFSP.mkdtemp(NodePath.join(NodeOS.tmpdir(), "t3-app-ssh-test-"));
+        const target = makeTarget(NodePath.join(root, "userdata"), platform, userId);
+        const received: DesktopAppActivationRequest[] = [];
+        const server = await startDesktopAppControlServer({
+          ...target,
+          userId,
+          handle: async (input) => {
+            received.push(input);
+            return {
+              version: 1,
+              requestId: input.requestId,
+              ok: true,
+              projectId: ProjectId.make("remote-project"),
+              threadId: ThreadId.make("remote-thread"),
+            };
+          },
+          cancel: () => undefined,
+          onReclaimError: () => undefined,
+        });
+        try {
+          const payload = {
+            version: 1,
+            requestId: "ssh-request",
+            type: "open-ssh-workspace",
+            sshAlias: "devbox",
+            workspaceRoot: "/remote/my project's + & # ? = %2F/проект",
+          } as const;
+          await expect(exchange(target.address, payload)).resolves.toMatchObject({
+            ok: true,
+            projectId: "remote-project",
+          });
+          expect(received).toEqual([payload]);
+        } finally {
+          await server.close();
+          await NodeFSP.rm(root, { recursive: true, force: true });
+        }
+      });
+    }),
+  );
+
   it.effect("cancels a queued request when the client disconnects", () =>
     Effect.gen(function* () {
       const platform = yield* HostProcess.Platform;
