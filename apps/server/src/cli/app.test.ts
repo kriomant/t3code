@@ -215,6 +215,37 @@ describe("t3 server command safety", () => {
 });
 
 describe("t3 app", () => {
+  it.effect("sends an explicit project title for both local and SSH opens", () =>
+    withTempDirectory("t3-app-title-test-", (root) =>
+      Effect.gen(function* () {
+        const desktop = yield* fakeDesktop({ baseDir: root });
+        const title = "feature's $(literal) + проект";
+        yield* runCli(["app", "/local/arcadia", "--title", title, "--base-dir", root]);
+        yield* runCli([
+          "app",
+          "--ssh",
+          "devbox",
+          "/remote/arcadia",
+          "--title",
+          title,
+          "--base-dir",
+          root,
+        ]);
+        expect(desktop.received.map((request) => request.title)).toEqual([title, title]);
+      }).pipe(Effect.scoped),
+    ),
+  );
+
+  it.effect("rejects an empty project title before contacting the desktop app", () =>
+    withTempDirectory("t3-app-empty-title-test-", (root) =>
+      Effect.gen(function* () {
+        const desktop = yield* fakeDesktop({ baseDir: root });
+        yield* runCli(["app", "--title", "   ", "--base-dir", root]).pipe(Effect.flip);
+        expect(desktop.received).toHaveLength(0);
+      }).pipe(Effect.scoped),
+    ),
+  );
+
   it.effect("sends SSH aliases and absolute remote paths literally from the local machine", () =>
     withTempDirectory("t3-app-ssh-test-", (root) =>
       Effect.gen(function* () {

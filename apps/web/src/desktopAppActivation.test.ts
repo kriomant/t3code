@@ -34,8 +34,10 @@ function dependencies(
       id: existingProjectId,
       environmentId,
       workspaceRoot: request.workspaceRoot,
+      title: "project",
     }),
     createProject: vi.fn(async () => createdProjectId),
+    renameProject: vi.fn(async () => undefined),
     waitForProject: vi.fn(async () => undefined),
     openThread: vi.fn(async () => ({ threadId })),
     ...overrides,
@@ -43,6 +45,74 @@ function dependencies(
 }
 
 describe("desktop app activation", () => {
+  it("creates a named project using the explicit title", async () => {
+    const deps = dependencies({ findProject: () => null });
+    const title = "CLOUD-123 · branch's $(literal) + проект";
+    const response = await handleDesktopAppActivationRequest({ ...request, title }, deps);
+    expect(response).toMatchObject({ ok: true, projectId: createdProjectId });
+    expect(deps.createProject).toHaveBeenCalledWith(environmentId, request.workspaceRoot, title);
+    expect(deps.renameProject).not.toHaveBeenCalled();
+  });
+
+  it("renames an existing SSH project in its environment before opening the thread", async () => {
+    const remoteId = EnvironmentId.make("remote");
+    const order: string[] = [];
+    const title = "feature/worktree-name";
+    const deps = dependencies({
+      getTarget: () => ({ environmentId: remoteId, platform: "linux" }),
+      renameProject: vi.fn(async () => {
+        order.push("rename");
+      }),
+      openThread: vi.fn(async () => {
+        order.push("open");
+        return { threadId };
+      }),
+    });
+    const response = await handleDesktopAppActivationRequest(
+      {
+        version: 1,
+        requestId: "named-ssh",
+        type: "open-ssh-workspace",
+        sshAlias: "devbox",
+        workspaceRoot: "/work/feature/arcadia",
+        title,
+      },
+      deps,
+    );
+    expect(response).toMatchObject({ ok: true, projectId: existingProjectId });
+    expect(order).toEqual(["rename", "open"]);
+    expect(deps.renameProject).toHaveBeenCalledWith(
+      { environmentId: remoteId, projectId: existingProjectId },
+      title,
+    );
+    expect(deps.createProject).not.toHaveBeenCalled();
+  });
+
+  it("preserves existing names when no title is supplied or the title already matches", async () => {
+    const deps = dependencies();
+    await handleDesktopAppActivationRequest(request, deps);
+    await handleDesktopAppActivationRequest({ ...request, title: "project" }, deps);
+    expect(deps.renameProject).not.toHaveBeenCalled();
+  });
+
+  it("does not open a thread when renaming fails", async () => {
+    const deps = dependencies({
+      renameProject: vi.fn(async () => {
+        throw new Error("Rename denied");
+      }),
+    });
+    const response = await handleDesktopAppActivationRequest(
+      { ...request, title: "feature" },
+      deps,
+    );
+    expect(response).toMatchObject({
+      ok: false,
+      code: "project-update-failed",
+      message: "Rename denied",
+    });
+    expect(deps.openThread).not.toHaveBeenCalled();
+  });
+
   it("opens the exact remote path in the selected SSH environment, regardless of the local platform", async () => {
     const remoteId = EnvironmentId.make("ssh-environment");
     const workspaceRoot = "/remote/my project's + & # ? = %2F/проект";
@@ -62,7 +132,7 @@ describe("desktop app activation", () => {
 
     expect(response).toMatchObject({ ok: true, projectId: createdProjectId });
     expect(deps.getTarget).toHaveBeenCalledWith(sshRequest);
-    expect(deps.createProject).toHaveBeenCalledWith(remoteId, workspaceRoot);
+    expect(deps.createProject).toHaveBeenCalledWith(remoteId, workspaceRoot, undefined);
     expect(deps.openThread).toHaveBeenCalledWith({
       environmentId: remoteId,
       projectId: createdProjectId,

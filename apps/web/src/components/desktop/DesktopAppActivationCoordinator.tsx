@@ -22,6 +22,7 @@ export function DesktopAppActivationCoordinator() {
   const primaryEnvironment = usePrimaryEnvironment();
   const { isReady: catalogReady, environments } = useEnvironments();
   const createProject = useAtomCommand(projectEnvironment.create, { reportFailure: false });
+  const updateProject = useAtomCommand(projectEnvironment.update, { reportFailure: false });
   const openThread = useNewThreadHandler();
   const queueRef = useRef(Promise.resolve());
   const activation = window.desktopBridge?.appActivation;
@@ -79,13 +80,13 @@ export function DesktopAppActivationCoordinator() {
           readProjects().filter((project) => project.environmentId === environmentId),
           workspaceRoot,
         ) ?? null,
-      createProject: async (environmentId, workspaceRoot) => {
+      createProject: async (environmentId, workspaceRoot, title) => {
         const projectId = newProjectId();
         const result = await createProject({
           environmentId,
           input: {
             projectId,
-            title: inferProjectTitleFromPath(workspaceRoot),
+            title: title ?? inferProjectTitleFromPath(workspaceRoot),
             workspaceRoot,
             createWorkspaceRootIfMissing: false,
             defaultModelSelection: null,
@@ -96,6 +97,16 @@ export function DesktopAppActivationCoordinator() {
           throw error instanceof Error ? error : new Error("T3 Code could not add the project.");
         }
         return projectId;
+      },
+      renameProject: async (projectRef, title) => {
+        const result = await updateProject({
+          environmentId: projectRef.environmentId,
+          input: { projectId: projectRef.projectId, title },
+        });
+        if (result._tag === "Failure") {
+          const error = squashAtomCommandFailure(result);
+          throw error instanceof Error ? error : new Error("T3 Code could not rename the project.");
+        }
       },
       waitForProject: async (projectRef) => {
         await waitForProject(projectRef);

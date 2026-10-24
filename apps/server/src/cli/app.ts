@@ -6,6 +6,7 @@ import {
   DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION,
   DesktopAppActivationErrorCode,
   DesktopAppActivationResponse,
+  TrimmedNonEmptyString,
   type DesktopAppActivationPlatform,
   type DesktopAppActivationRequest,
 } from "@t3tools/contracts";
@@ -193,6 +194,7 @@ const runAppCommand = Effect.fn("cli.app")(function* (flags: {
   readonly baseDir: Option.Option<string>;
   readonly workspaceRoot: Option.Option<string>;
   readonly sshAlias: Option.Option<string>;
+  readonly title: Option.Option<string>;
 }) {
   const environment = yield* appEnvironment;
   const hostPlatform = yield* HostProcess.Platform;
@@ -240,6 +242,7 @@ const runAppCommand = Effect.fn("cli.app")(function* (flags: {
     version: DESKTOP_APP_ACTIVATION_PROTOCOL_VERSION,
     requestId,
     workspaceRoot,
+    ...Option.match(flags.title, { onNone: () => ({}), onSome: (title) => ({ title }) }),
     ...(sshAlias === undefined
       ? ({ type: "open-workspace", platform: hostPlatform } as const)
       : ({ type: "open-ssh-workspace", sshAlias } as const)),
@@ -277,6 +280,13 @@ const runAppCommand = Effect.fn("cli.app")(function* (flags: {
 
 export const appCommand = Command.make("app", {
   baseDir: baseDirFlag,
+  title: Flag.String("title").pipe(
+    Flag.withSchema(TrimmedNonEmptyString),
+    Flag.withDescription(
+      "Project title. Renames an existing project at this directory when supplied.",
+    ),
+    Flag.optional,
+  ),
   sshAlias: Flag.String("ssh").pipe(
     Flag.withDescription(
       "Saved SSH alias in the local desktop app. Requires an absolute remote path.",

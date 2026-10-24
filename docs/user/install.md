@@ -118,6 +118,15 @@ resolved against your local directory. This opens a new thread without sending a
 prompt. Missing, disabled, disconnected, or ambiguous SSH environments report an
 error instead of opening a local project.
 
+Pass `--title` to name the project instead of using the directory's last component:
+
+```bash
+t3 app --ssh devbox /worktrees/feature/arcadia --title "feature"
+```
+
+This also renames a project already registered for that directory. Omit `--title`
+to keep an existing name. The option works for local projects too.
+
 ## Mobile app
 
 Install T3 Code from the
