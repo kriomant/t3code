@@ -13,6 +13,7 @@ export const DesktopAppActivationRequest = Schema.Union([
     requestId: TrimmedNonEmptyString,
     type: Schema.Literal("open-workspace"),
     workspaceRoot: TrimmedNonEmptyString,
+    title: Schema.optionalKey(TrimmedNonEmptyString),
     platform: DesktopAppActivationPlatform,
   }),
   Schema.Struct({
@@ -20,6 +21,7 @@ export const DesktopAppActivationRequest = Schema.Union([
     requestId: TrimmedNonEmptyString,
     type: Schema.Literal("open-ssh-workspace"),
     workspaceRoot: TrimmedNonEmptyString,
+    title: Schema.optionalKey(TrimmedNonEmptyString),
     sshAlias: TrimmedNonEmptyString,
   }),
 ]);
@@ -31,6 +33,7 @@ export const DesktopAppActivationErrorCode = Schema.Literals([
   "environment-unavailable",
   "platform-mismatch",
   "project-create-failed",
+  "project-update-failed",
   "thread-open-failed",
   "request-timeout",
   "internal-error",

@@ -15,6 +15,7 @@ export interface DesktopAppActivationProject {
   readonly id: ProjectId;
   readonly environmentId: EnvironmentId;
   readonly workspaceRoot: string;
+  readonly title: string;
 }
 
 export interface DesktopAppActivationTarget {
@@ -31,7 +32,9 @@ export interface DesktopAppActivationDependencies {
   readonly createProject: (
     environmentId: EnvironmentId,
     workspaceRoot: string,
+    title?: string,
   ) => Promise<ProjectId>;
+  readonly renameProject: (projectRef: ScopedProjectRef, title: string) => Promise<void>;
   readonly waitForProject: (projectRef: ScopedProjectRef) => Promise<void>;
   readonly openThread: (
     projectRef: ScopedProjectRef,
@@ -100,16 +103,36 @@ export async function handleDesktopAppActivationRequest(
     );
   }
 
-  let projectId = dependencies.findProject(target.environmentId, request.workspaceRoot)?.id ?? null;
+  const existing = dependencies.findProject(target.environmentId, request.workspaceRoot);
+  let projectId = existing?.id ?? null;
   if (projectId === null) {
     try {
-      projectId = await dependencies.createProject(target.environmentId, request.workspaceRoot);
+      projectId = await dependencies.createProject(
+        target.environmentId,
+        request.workspaceRoot,
+        request.title,
+      );
       await dependencies.waitForProject({ environmentId: target.environmentId, projectId });
     } catch (error) {
       return failure(
         request.requestId,
         "project-create-failed",
         errorMessage(error, "T3 Code could not add the project."),
+      );
+    }
+  }
+
+  if (existing !== null && request.title !== undefined && existing.title !== request.title) {
+    try {
+      await dependencies.renameProject(
+        { environmentId: target.environmentId, projectId: existing.id },
+        request.title,
+      );
+    } catch (error) {
+      return failure(
+        request.requestId,
+        "project-update-failed",
+        errorMessage(error, "T3 Code could not rename the project."),
       );
     }
   }
