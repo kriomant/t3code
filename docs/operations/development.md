@@ -210,6 +210,23 @@ DMGs default to the host architecture. Use `--arch` to choose another target and
 to retain packaging files for inspection. Run `vp run dist:desktop:artifact --help` for other
 options.
 
+### Custom desktop builds with SSH
+
+SSH setup downloads the remote CLI archive matching the desktop version by default.
+An unpublished preview version has no release archive, so it fails with HTTP 404.
+When building a custom desktop app, select a compatible published CLI version:
+
+```sh
+T3CODE_DESKTOP_SSH_RUNTIME_VERSION=0.1.2-nightly.20261022.3512 \
+  vp run dist:desktop:artifact --platform mac --target dmg \
+  --build-version 0.1.2-preview.20261024.1
+```
+
+The runtime version is embedded at build time; it does not change the desktop
+version or update channel. Choose an upstream release compatible with your source
+checkout and verify that its release contains `SHA256SUMS` and the CLI archives for
+your remote hosts. Ordinary release builds can leave the override unset.
+
 ### Linux AppImage prerequisites
 
 Build on Linux because the browser-secret helper links against the host's libsecret. Install
